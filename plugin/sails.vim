@@ -14,7 +14,7 @@ function! s:Detect(filename)
   endif
   let ofn = ""
   while fn != ofn
-    if filereadable(fn . "/config/controllers.js")
+    if filereadable(fn . "/config/controllers.js") && fn != "."
       return s:BufInit(resolve(fn))
     endif
     let ofn = fn
@@ -23,7 +23,18 @@ function! s:Detect(filename)
       let fn = ''
     endif
   endwhile
+  call s:Leave()
   return 0
+endfunction
+
+function! s:rquote(str)
+  if a:str =~ '^[A-Za-z0-9_/.:-]\+$'
+    return a:str
+  elseif &shell =~? 'cmd'
+    return '"'.s:gsub(s:gsub(a:str, '"', '""'), '\%', '"%"').'"'
+  else
+    return shellescape(a:str)
+  endif
 endfunction
 
 function! s:BufInit(path)
@@ -35,6 +46,13 @@ function! s:sub(str,pat,rep)
 endfunction
 
 let s:sid = s:sub(maparg("<SID>xx"),'xx$','')
+
+function! s:error(str)
+  echohl ErrorMsg
+  echomsg a:str
+  echohl None
+  let v:errmsg = a:str
+endfunction
 
 function! s:completion_filter(results,A)
   let results = sort(type(a:results) == type("") ? split(a:results,"\n") : copy(a:results))
@@ -67,22 +85,30 @@ function! s:controllerList(A,L,P)
   return s:autocamelize(con,a:A)
 endfunction
 
-function! s:modelList(A,L,P)
-  let con = s:relglob("api/models/","**/*",".js")
+function! s:itemList(path, A)
+  let con = s:relglob(a:path,"**/*",".js")
   call map(con,'s:sub(v:val,"$","")')
   return s:autocamelize(con,a:A)
+endfunction
+
+function! s:modelList(A,L,P)
+  return s:itemList("api/models/", a:A)
 endfunction
 
 function! s:configList(A,L,P)
-  let con = s:relglob("config/","**/*",".js")
-  call map(con,'s:sub(v:val,"$","")')
-  return s:autocamelize(con,a:A)
+  return s:itemList("config/", a:A)
+endfunction
+
+function! s:serviceList(A,L,P)
+  return s:itemList("api/services/", a:A)
+endfunction
+
+function! s:adapterList(A,L,P)
+  return s:itemList("api/adapters/", a:A)
 endfunction
 
 function! s:policyList(A,L,P)
-  let con = s:relglob("api/policies/","**/*",".js")
-  call map(con,'s:sub(v:val,"$","")')
-  return s:autocamelize(con,a:A)
+  return s:itemList("api/policies/", a:A)
 endfunction
 
 function! s:viewList(A,L,P)
@@ -169,13 +195,13 @@ function! s:editcmdfor(cmd)
   return cmd
 endfunction
 
-function! s:policyEdit(cmd,...)
-  let policy_name = matchstr(a:1, '[^#!]*')
+function! s:itemEdit(cmd, path, pattern)
+  let item_name = matchstr(a:pattern, '[^#!]*')
   let file_candidates = [
-        \b:sails_root . "/api/policies/" . policy_name . ".js",
-        \b:sails_root . "/api/policies/" . policy_name,
-        \b:sails_root . "/api/policies/" . s:camelize(policy_name) . ".js",
-        \b:sails_root . "/api/policies/" . s:camelize(policy_name)
+        \b:sails_root . a:path . item_name . ".js",
+        \b:sails_root . a:path . item_name,
+        \b:sails_root . a:path . s:camelize(item_name) . ".js",
+        \b:sails_root . a:path . s:camelize(item_name)
         \]
   let cmd = s:editcmdfor(a:cmd)
   for file_path in file_candidates
@@ -183,41 +209,54 @@ function! s:policyEdit(cmd,...)
       return cmd . file_path
     endif
   endfor
+  call s:error("Item not found")
+endfunction
+
+function! s:policyEdit(cmd,...)
+  if !exists("a:1")
+    call s:error("Policy name not specified")
+    return
+  endif
+  return s:itemEdit(a:cmd, "/api/policies/", a:1)
 endfunction
 
 function! s:modelEdit(cmd,...)
-  let model_name = matchstr(a:1, '[^#!]*')
-  let file_candidates = [
-        \b:sails_root . "/api/models/" . model_name . ".js",
-        \b:sails_root . "/api/models/" . model_name,
-        \b:sails_root . "/api/models/" . s:camelize(model_name) . ".js",
-        \b:sails_root . "/api/models/" . s:camelize(model_name)
-        \]
-  let cmd = s:editcmdfor(a:cmd)
-  for file_path in file_candidates
-    if filereadable(file_path)
-      return cmd . file_path
-    endif
-  endfor
+  if !exists("a:1")
+    call s:error("Model name not specified")
+    return
+  endif
+  return s:itemEdit(a:cmd, "/api/models/", a:1)
 endfunction
 
 function! s:configEdit(cmd,...)
-  let config_name = matchstr(a:1, '[^#!]*')
-  let file_candidates = [
-        \b:sails_root . "/config/" . config_name . ".js",
-        \b:sails_root . "/config/" . config_name,
-        \b:sails_root . "/config/" . s:camelize(config_name) . ".js",
-        \b:sails_root . "/config/" . s:camelize(config_name)
-        \]
-  let cmd = s:editcmdfor(a:cmd)
-  for file_path in file_candidates
-    if filereadable(file_path)
-      return cmd . file_path
-    endif
-  endfor
+  if !exists("a:1")
+    call s:error("Config name not specified")
+    return
+  endif
+  return s:itemEdit(a:cmd, "/config/", a:1)
+endfunction
+
+function! s:serviceEdit(cmd,...)
+  if !exists("a:1")
+    call s:error("Service name not specified")
+    return
+  endif
+  return s:itemEdit(a:cmd, "/api/services/", a:1)
+endfunction
+
+function! s:adapterEdit(cmd,...)
+  if !exists("a:1")
+    call s:error("Adapter name not specified")
+    return
+  endif
+  return s:itemEdit(a:cmd, "/api/adapters/", a:1)
 endfunction
 
 function! s:viewEdit(cmd,...)
+  if !exists("a:1")
+    call s:error("View name not specified")
+    return
+  endif
   let view_name = matchstr(a:1, '[^#!]*')
   let file_candidates = [
         \b:sails_root . "/views/" . view_name . ".ejs",
@@ -231,9 +270,14 @@ function! s:viewEdit(cmd,...)
       return cmd . file_path
     endif
   endfor
+  call s:error("View not found")
 endfunction
 
 function! s:controllerEdit(cmd,...)
+  if !exists("a:1")
+    call s:error("Controller name not specified")
+    return
+  endif
   let controller_name = matchstr(a:1, '[^#!]*')
   let file_candidates = [
         \b:sails_root . "/api/controllers/" . controller_name . "Controller.js",
@@ -249,6 +293,29 @@ function! s:controllerEdit(cmd,...)
       return cmd . file_path
     endif
   endfor
+  call s:error("Controller not found")
+endfunction
+
+function s:Complete_generate(A, L, P)
+  return s:completion_filter(['controller', 'model', 'view', 'adapter'], a:A)
+endfunction
+
+function! s:prepare_sails_command(cmd)
+  return 'sails '.a:cmd
+endfunction
+
+function s:generator_command(bang,...)
+  let cmd = join(map(copy(a:000),'s:rquote(v:val)'),' ')
+  let &l:makeprg = s:prepare_sails_command(cmd)
+  if a:bang
+    make!
+  else
+    make
+  endif
+endfunction
+
+function! s:addgenerators()
+  command! -buffer -bang -bar -nargs=* -complete=customlist,s:Complete_generate Sgenerate :execute s:generator_command(<bang>0,'generate',<f-args>)
 endfunction
 
 function! s:SailsNavigation()
@@ -257,6 +324,13 @@ function! s:SailsNavigation()
   call s:addfilecmds("view")
   call s:addfilecmds("policy")
   call s:addfilecmds("config")
+  call s:addfilecmds("service")
+  call s:addfilecmds("adapter")
+  call s:addgenerators()
+endfunction
+
+function! s:Leave()
+  unlet! b:sails_root
 endfunction
 
 augroup sailsPlugin
